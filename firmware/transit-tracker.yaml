@@ -3,6 +3,8 @@ substitutions:
   friendly_name: "Transit Tracker"
   project_version: "dev"
   pixolletta_file_path: "https://raw.githubusercontent.com/EastsideUrbanism/transit-tracker/main/firmware/fonts/Pixolletta8px.ttf"
+  # Used for night mode hours. Home Assistant 2026.3+ overrides it with its own timezone.
+  timezone: "America/Los_Angeles"
 
 esphome:
   name: ${name}
@@ -31,6 +33,16 @@ globals:
   - id: ota_progress
     type: float
     restore_value: false
+  # Last brightness requested by the Display Brightness light, before night mode is applied
+  - id: requested_brightness
+    type: float
+    restore_value: false
+    initial_value: "1.0"
+  # Set when a button is pressed during night hours; cleared once night hours end
+  - id: night_mode_snoozed
+    type: bool
+    restore_value: false
+    initial_value: "false"
 
 external_components:
   # This pin can be removed once the changes from this
@@ -265,6 +277,58 @@ select:
     on_value:
       then:
         - script.execute: update_orientation
+  - platform: template
+    id: night_mode_config
+    name: "Night Mode"
+    icon: "mdi:weather-night"
+    entity_category: "config"
+    optimistic: true
+    restore_value: true
+    options:
+      - "Disabled"
+      - "Dim Display"
+      - "Turn Off Display"
+    on_value:
+      then:
+        - script.execute: update_night_mode
+
+datetime:
+  - &night_time_common
+    platform: template
+    type: time
+    id: night_start_config
+    name: "Night Start"
+    icon: "mdi:weather-sunset-down"
+    entity_category: "config"
+    optimistic: true
+    restore_value: true
+    initial_value: "22:00:00"
+    on_value:
+      then:
+        - script.execute: update_night_mode
+  - <<: *night_time_common
+    id: night_end_config
+    name: "Night End"
+    icon: "mdi:weather-sunset-up"
+    initial_value: "07:00:00"
+
+number:
+  - platform: template
+    id: night_brightness_config
+    name: "Night Brightness"
+    icon: "mdi:brightness-4"
+    entity_category: "config"
+    unit_of_measurement: "%"
+    mode: slider
+    min_value: 1
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 10
+    on_value:
+      then:
+        - script.execute: apply_brightness
 
 output:
   - platform: template
@@ -273,9 +337,8 @@ output:
     min_power: 0.004 # 1/255
     zero_means_zero: true
     write_action:
-      - hub75.set_brightness:
-          id: matrix
-          brightness: !lambda return state * 255.0;
+      - lambda: id(requested_brightness) = state;
+      - script.execute: apply_brightness
 
 light:
   - platform: monochromatic
@@ -297,6 +360,61 @@ script:
           id: display_brightness
           relative_brightness: !lambda "return up ? 0.2 : -0.2;"
           transition_length: 0.1s
+  - id: handle_brightness_button
+    parameters:
+      up: bool
+    then:
+      - if:
+          condition:
+            lambda: return id(night_mode_active).state && !id(night_mode_snoozed);
+          then:
+            # The first press during night hours wakes the display until the next night
+            - lambda: id(night_mode_snoozed) = true;
+            - script.execute: update_night_mode
+          else:
+            - script.execute:
+                id: dim_display
+                up: !lambda return up;
+  - id: apply_brightness
+    then:
+      - hub75.set_brightness:
+          id: matrix
+          brightness: !lambda |-
+            float brightness = id(requested_brightness);
+            if (id(night_mode_active).state) {
+              if (id(night_mode_config).current_option() == "Turn Off Display") {
+                brightness = 0.0f;
+              } else if (brightness > 0.0f) {
+                brightness = std::min(brightness, id(night_brightness_config).state / 100.0f);
+              }
+            }
+            return brightness * 255.0;
+  - id: update_night_mode
+    then:
+      - lambda: |-
+          bool in_night_hours = false;
+          auto now = id(sntp_time).now();
+          if (now.is_valid() && id(night_mode_config).current_option() != "Disabled") {
+            int current = now.hour * 60 + now.minute;
+            int start = id(night_start_config).hour * 60 + id(night_start_config).minute;
+            int end = id(night_end_config).hour * 60 + id(night_end_config).minute;
+            if (start < end) {
+              in_night_hours = current >= start && current < end;
+            } else if (start > end) {
+              // Night hours wrap past midnight, e.g. 22:00 to 07:00
+              in_night_hours = current >= start || current < end;
+            }
+          }
+
+          if (!in_night_hours) {
+            id(night_mode_snoozed) = false;
+          }
+
+          bool active = in_night_hours && !id(night_mode_snoozed);
+          if (!id(night_mode_active).has_state() || id(night_mode_active).state != active) {
+            id(night_mode_active).publish_state(active);
+          }
+      - script.execute: apply_brightness
   - id: update_firmware
     then:
       - if:
@@ -377,7 +495,7 @@ binary_sensor:
     on_press:
       then:
         - script.execute:
-            id: dim_display
+            id: handle_brightness_button
             up: !lambda "return !id(flip_display_config).state;"
   - platform: gpio
     id: down_button
@@ -388,8 +506,13 @@ binary_sensor:
     on_press:
       then:
         - script.execute:
-            id: dim_display
+            id: handle_brightness_button
             up: !lambda "return id(flip_display_config).state;"
+  - platform: template
+    id: night_mode_active
+    name: "Night Mode Active"
+    icon: "mdi:weather-night"
+    entity_category: "diagnostic"
 
 i2c:
   sda: GPIO16
@@ -493,7 +616,14 @@ font:
 time:
   - platform: sntp
     id: sntp_time
-    timezone: America/Los_Angeles
+    timezone: ${timezone}
+    on_time_sync:
+      then:
+        - script.execute: update_night_mode
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: update_night_mode
 
 web_server:
   version: 3

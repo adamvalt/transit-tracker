@@ -45,3 +45,15 @@ interval:
       - display.page.show_next: matrix
       - component.update: matrix
 ```
+
+## Change the time zone
+
+The time zone is used for [night mode](../02-user-manual/99-faq/night-mode.md) hours and defaults to `America/Los_Angeles`. Home Assistant 2026.3 or newer sets it automatically. Otherwise, you can override the `timezone` substitution with any [IANA time zone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
+
+```yaml
+substitutions:
+  timezone: "Europe/Prague"
+
+packages:
+  transit_tracker: github://EastsideUrbanism/transit-tracker/firmware/transit-tracker.yaml@main
+```
