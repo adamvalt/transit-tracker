@@ -318,14 +318,13 @@ number:
     name: "Night Brightness"
     icon: "mdi:brightness-4"
     entity_category: "config"
-    unit_of_measurement: "%"
     mode: slider
-    min_value: 1
-    max_value: 100
+    min_value: 0
+    max_value: 255
     step: 1
     optimistic: true
     restore_value: true
-    initial_value: 10
+    initial_value: 25
     on_value:
       then:
         - script.execute: apply_brightness
@@ -385,7 +384,7 @@ script:
               if (id(night_mode_config).current_option() == "Turn Off Display") {
                 brightness = 0.0f;
               } else if (brightness > 0.0f) {
-                brightness = std::min(brightness, id(night_brightness_config).state / 100.0f);
+                brightness = std::min(brightness, id(night_brightness_config).state / 255.0f);
               }
             }
             return brightness * 255.0;

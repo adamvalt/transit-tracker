@@ -4,7 +4,7 @@ Yes. Night mode automatically dims or turns off the display during the hours you
 
 - **Night Mode**: choose `Disabled`, `Dim Display` or `Turn Off Display`.
 - **Night Start** and **Night End**: the hours night mode is active, such as 22:00 to 07:00. The hours can span midnight.
-- **Night Brightness**: how bright the display is during night hours when using `Dim Display`. The display is never made brighter than your normal brightness setting.
+- **Night Brightness**: how bright the display is during night hours when using `Dim Display`, from 0 to 255 like the normal brightness setting. The display is never made brighter than your normal brightness setting.
 
 Your normal brightness setting is left untouched and comes back automatically when the night hours end.
 
